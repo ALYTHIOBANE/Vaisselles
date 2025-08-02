@@ -111,6 +111,18 @@ class DatabaseManager:
         conn.close()
         return results
 
+    def get_total_ventes_du_jour(self):
+        """Calcule la somme totale des produits vendus aujourd'hui"""
+        today = date.today().isoformat()
+        query = """
+            SELECT SUM(s.quantite * a.prix_unitaire)
+            FROM sorties s
+            JOIN articles a ON s.article_id = a.id
+            WHERE s.date_sortie = ?
+        """
+        total = self.db_manager.execute_query(query, (today,))[0][0]
+        return total or 0
+
 class LoginDialog(QDialog):
     def __init__(self, db_manager):
         super().__init__()
@@ -695,6 +707,20 @@ class StockManagementApp(QMainWindow):
         stats_layout.addWidget(QLabel("Valeur totale:"), 1, 0)
         stats_layout.addWidget(self.total_value_label, 1, 1)
         
+        self.total_ventes_label = QLabel("0.00 FCFA")
+        self.total_ventes_label.setStyleSheet("font-size: 24px; font-weight: bold; color: orange;")
+        stats_layout.addWidget(QLabel("Ventes du jour:"), 2, 0)
+        stats_layout.addWidget(self.total_ventes_label, 2, 1)
+        
+        # Total des ventes du jour
+        total_ventes = self.get_total_ventes_du_jour()
+        self.total_ventes_label.setText(f"{total_ventes:.2f} FCFA")
+        
+        self.total_ventes_label = QLabel("0.00 FCFA")
+        self.total_ventes_label.setStyleSheet("font-size: 24px; font-weight: bold; color: orange;")
+        stats_layout.addWidget(QLabel("Ventes du jour:"), 2, 0)
+        stats_layout.addWidget(self.total_ventes_label, 2, 1)
+        
         layout.addWidget(stats_group)
         
         # Alertes stocks bas
@@ -864,6 +890,18 @@ class StockManagementApp(QMainWindow):
                 item = QTableWidgetItem(str(value) if value else "")
                 self.sorties_table.setItem(row, col, item)
     
+    def get_total_ventes_du_jour(self):
+        """Calcule la somme totale des produits vendus aujourd'hui"""
+        today = date.today().isoformat()
+        query = """
+            SELECT SUM(s.quantite * a.prix_unitaire)
+            FROM sorties s
+            JOIN articles a ON s.article_id = a.id
+            WHERE s.date_sortie = ?
+        """
+        total = self.db_manager.execute_query(query, (today,))[0][0]
+        return total or 0
+    
     def load_dashboard(self):
         """Charge les données du tableau de bord"""
         # Statistiques générales
@@ -879,6 +917,10 @@ class StockManagementApp(QMainWindow):
         value_query = "SELECT SUM(quantite * prix_unitaire) FROM articles"
         total_value = self.db_manager.execute_query(value_query)[0][0] or 0
         self.total_value_label.setText(f"{total_value:.2f} FCFA")
+        
+        # Total des ventes du jour
+        total_ventes = self.get_total_ventes_du_jour()
+        self.total_ventes_label.setText(f"{total_ventes:.2f} FCFA")
         
         # Alertes stocks bas
         self.load_alerts()
