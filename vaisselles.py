@@ -11,7 +11,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QProgressBar, QStatusBar, QMenuBar, QAction, QFileDialog,
                              QCheckBox)  # Assure-toi que QCheckBox est bien importé
 from PyQt5.QtCore import Qt, QDate, QTimer
-from PyQt5.QtGui import QIcon, QFont, QPalette, QColor
+from PyQt5.QtGui import QIcon, QFont, QPalette, QColor, QPixmap
 import json
 from reportlab.lib.pagesizes import letter, A4
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
@@ -120,124 +120,8 @@ class DatabaseManager:
             JOIN articles a ON s.article_id = a.id
             WHERE s.date_sortie = ?
         """
-        total = self.db_manager.execute_query(query, (today,))[0][0]
+        total = self.execute_query(query, (today,))[0][0]
         return total or 0
-
-class LoginDialog(QDialog):
-    def __init__(self, db_manager):
-        super().__init__()
-        self.db_manager = db_manager
-        self.user_role = None
-        self.username = None
-        self.init_ui()
-
-    def init_ui(self):
-        self.setWindowTitle("Connexion - Gestion de Stocks")
-        self.setFixedSize(340, 260)
-        self.setStyleSheet("""
-            QDialog {
-                background: #f7f7fa;
-                border-radius: 12px;
-            }
-            QLabel#titleLabel {
-                font-size: 18px;
-                font-weight: bold;
-                color: #2d3a4b;
-            }
-            QLineEdit, QComboBox {
-                border: 1.5px solid #b0b8c1;
-                border-radius: 8px;
-                padding: 6px;
-                font-size: 14px;
-            }
-            QLineEdit:focus {
-                border: 2px solid #4a90e2;
-                background: #eaf4ff;
-            }
-            QPushButton {
-                background: #4a90e2;
-                color: white;
-                border-radius: 8px;
-                padding: 8px 0;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background: #357ab8;
-            }
-            QCheckBox {
-                font-size: 12px;
-                color: #2d3a4b;
-            }
-        """)
-
-        layout = QVBoxLayout()
-
-        # Titre
-        title = QLabel("Gestion de Stocks de Vaisselle")
-        title.setObjectName("titleLabel")
-        title.setAlignment(Qt.AlignCenter)
-        layout.addWidget(title)
-
-        # Formulaire de connexion
-        form_layout = QFormLayout()
-        self.username_edit = QLineEdit()
-        self.username_edit.setPlaceholderText("Nom d'utilisateur")
-        form_layout.addRow("Utilisateur:", self.username_edit)
-
-        self.password_edit = QLineEdit()
-        self.password_edit.setEchoMode(QLineEdit.Password)
-        self.password_edit.setPlaceholderText("Mot de passe")
-        form_layout.addRow("Mot de passe:", self.password_edit)
-
-        # Option afficher le mot de passe
-        self.show_password_cb = QCheckBox("Afficher le mot de passe")
-        self.show_password_cb.toggled.connect(
-            lambda checked: self.password_edit.setEchoMode(QLineEdit.Normal if checked else QLineEdit.Password)
-        )
-        form_layout.addRow("", self.show_password_cb)
-
-        layout.addLayout(form_layout)
-
-        # Boutons
-        button_layout = QHBoxLayout()
-        login_btn = QPushButton("Se connecter")
-        login_btn.clicked.connect(self.login)
-        login_btn.setDefault(True)
-        cancel_btn = QPushButton("Annuler")
-        cancel_btn.clicked.connect(self.reject)
-        button_layout.addWidget(login_btn)
-        button_layout.addWidget(cancel_btn)
-        layout.addLayout(button_layout)
-
-        # Info par défaut
-        # info_label = QLabel("Défaut: admin / admin123")
-        # info_label.setStyleSheet("color: gray; font-size: 10px;")
-        # info_label.setAlignment(Qt.AlignCenter)
-        # layout.addWidget(info_label)
-
-        # Footer élégant
-        footer = QLabel("© 2025 Gestion de Stocks de Vaisselle - Tous droits réservés")
-        footer.setStyleSheet("color: #8a8a8a; font-size: 11px; margin-top: 18px;")
-        footer.setAlignment(Qt.AlignCenter)
-        layout.addWidget(footer)
-
-        self.setLayout(layout)
-        self.password_edit.returnPressed.connect(self.login)
-
-    def login(self):
-        username = self.username_edit.text().strip()
-        password = self.password_edit.text().strip()
-        if not username or not password:
-            QMessageBox.warning(self, "Erreur", "Veuillez saisir le nom d'utilisateur et le mot de passe.")
-            return
-        query = "SELECT role FROM utilisateurs WHERE nom_utilisateur = ? AND mot_de_passe = ?"
-        result = self.db_manager.execute_query(query, (username, password))
-        if result:
-            self.user_role = result[0][0]
-            self.username = username
-            self.accept()
-        else:
-            QMessageBox.warning(self, "Erreur", "Nom d'utilisateur ou mot de passe incorrect.")
 
 class ArticleDialog(QDialog):
     def __init__(self, db_manager, article_data=None):
@@ -414,17 +298,88 @@ class MouvementDialog(QDialog):
         
         return data
 
+class VenteDialog(QDialog):
+    def __init__(self, db_manager):
+        super().__init__()
+        self.db_manager = db_manager
+        self.setWindowTitle("Nouvelle Vente")
+        self.setFixedSize(500, 400)
+        self.panier = []  # Liste des (article_id, designation, quantite, prix_unitaire)
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        self.articles = self.db_manager.execute_query(
+            "SELECT id, designation, prix_unitaire, quantite FROM articles WHERE quantite > 0 ORDER BY designation"
+        )
+
+        self.article_combo = QComboBox()
+        for art in self.articles:
+            self.article_combo.addItem(f"{art[1]} ({art[3]} dispo)", art)
+        layout.addWidget(self.article_combo)
+
+        self.qte_spin = QSpinBox()
+        self.qte_spin.setRange(1, 1000)
+        layout.addWidget(self.qte_spin)
+
+        add_btn = QPushButton("Ajouter au panier")
+        add_btn.clicked.connect(self.ajouter_au_panier)
+        layout.addWidget(add_btn)
+
+        self.panier_list = QListWidget()
+        layout.addWidget(self.panier_list)
+
+        self.total_label = QLabel("Total : 0 FCFA")
+        layout.addWidget(self.total_label)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.enregistrer_vente)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def ajouter_au_panier(self):
+        art = self.article_combo.currentData()
+        qte = self.qte_spin.value()
+        if qte > art[3]:
+            QMessageBox.warning(self, "Erreur", "Stock insuffisant.")
+            return
+        self.panier.append((art[0], art[1], qte, art[2]))
+        self.panier_list.addItem(f"{art[1]} x{qte} @ {art[2]:.2f} FCFA = {qte*art[2]:.2f} FCFA")
+        self.update_total()
+
+    def update_total(self):
+        total = sum(qte*prix for _,_,qte,prix in self.panier)
+        self.total_label.setText(f"Total : {total:.2f} FCFA")
+
+    def enregistrer_vente(self):
+        for article_id, _, quantite, _ in self.panier:
+            self.db_manager.execute_query(
+                "INSERT INTO sorties (article_id, quantite, date_sortie, motif, utilisateur, commentaire) VALUES (?, ?, ?, ?, ?, ?)",
+                (article_id, quantite, date.today().isoformat(), "Vente", "Caissier", "")
+            )
+            self.db_manager.execute_query(
+                "UPDATE articles SET quantite = quantite - ? WHERE id = ?",
+                (quantite, article_id)
+            )
+        self.accept()
+
+    def get_recapitulatif(self):
+        recap = "\n".join([f"{d} x{q} = {q*p:.2f} FCFA" for _,d,q,p in self.panier])
+        total = sum(q*p for _,_,q,p in self.panier)
+        return recap, total
+
 class StockManagementApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.db_manager = DatabaseManager()
-        self.current_user = None
-        self.user_role = None
+        self.current_user = "Utilisateur"
+        self.user_role = "utilisateur"
         
         # Connexion
-        if not self.authenticate():
-            sys.exit()
-        
+        # if not self.authenticate():
+        #     sys.exit()
+        # ==> On saute l'authentification, on définit un utilisateur par défaut
+
         self.init_ui()
         self.load_data()
         
@@ -433,15 +388,10 @@ class StockManagementApp(QMainWindow):
         self.timer.timeout.connect(self.check_low_stock)
         self.timer.start(60000)  # Vérification toutes les minutes
     
-    def authenticate(self):
-        """Gère l'authentification"""
-        login_dialog = LoginDialog(self.db_manager)
-        if login_dialog.exec_() == QDialog.Accepted:
-            self.current_user = login_dialog.username
-            self.user_role = login_dialog.user_role
-            return True
-        return False
-    
+    # Supprime la méthode authenticate (plus nécessaire)
+    # def authenticate(self):
+    #     ...
+
     def init_ui(self):
         self.setWindowTitle(f"Gestion de Stocks de Vaisselle - {self.current_user} ({self.user_role})")
         self.setGeometry(100, 100, 1200, 800)
@@ -516,6 +466,10 @@ class StockManagementApp(QMainWindow):
         refresh_action = QAction("Actualiser", self)
         refresh_action.triggered.connect(self.load_data)
         toolbar.addAction(refresh_action)
+
+        vente_action = QAction("Nouvelle Vente", self)
+        vente_action.triggered.connect(self.nouvelle_vente)
+        toolbar.addAction(vente_action)
     
     def create_articles_tab(self):
         """Crée l'onglet de gestion des articles"""
@@ -788,7 +742,6 @@ class StockManagementApp(QMainWindow):
                     item = QTableWidgetItem(f"{value:.2f} FCFA")
                 else:
                     item = QTableWidgetItem(str(value))
-                
                 self.articles_table.setItem(row, col, item)
             
             # Statut du stock
@@ -809,7 +762,7 @@ class StockManagementApp(QMainWindow):
             status_item.setBackground(color)
             status_item.setForeground(QColor(255, 255, 255))  # Texte blanc
             self.articles_table.setItem(row, 7, status_item)
-    
+
     def filter_articles(self):
         """Filtre les articles selon les critères"""
         search_text = self.search_edit.text().lower()
@@ -842,7 +795,7 @@ class StockManagementApp(QMainWindow):
                     show_row = False
             
             self.articles_table.setRowHidden(row, not show_row)
-    
+
     def load_entrees(self):
         """Charge les entrées dans le tableau"""
         date_from = self.date_from_entry.date().toPyDate()
@@ -862,12 +815,12 @@ class StockManagementApp(QMainWindow):
         
         for row, entree in enumerate(entrees):
             for col, value in enumerate(entree):
-                if col == 5 and value:  # Prix total
+                if col == 5 and value:
                     item = QTableWidgetItem(f"{value:.2f} FCFA")
                 else:
                     item = QTableWidgetItem(str(value) if value else "")
                 self.entrees_table.setItem(row, col, item)
-    
+
     def load_sorties(self):
         """Charge les sorties dans le tableau"""
         date_from = self.date_from_sortie.date().toPyDate()
@@ -1364,7 +1317,7 @@ class StockManagementApp(QMainWindow):
             story.append(Paragraph("Aucune sortie enregistrée.", styles['Normal']))
         
         doc.build(story)
-    
+
     def generate_low_stock_report(self, filename):
         """Génère un rapport des stocks bas PDF"""
         doc = SimpleDocTemplate(filename, pagesize=A4)
@@ -1394,7 +1347,6 @@ class StockManagementApp(QMainWindow):
         
         if articles:
             data = [['Désignation', 'Catégorie', 'Stock actuel', 'Unité', 'Seuil minimum', 'Statut']]
-            
             for article in articles:
                 designation, categorie, quantite, unite, seuil = article
                 status = "ÉPUISÉ" if quantite == 0 else "STOCK BAS"
@@ -1419,6 +1371,14 @@ class StockManagementApp(QMainWindow):
             story.append(Paragraph("✅ Aucun stock bas détecté !", styles['Normal']))
         
         doc.build(story)
+
+    def nouvelle_vente(self):
+        dialog = VenteDialog(self.db_manager)
+        if dialog.exec_() == QDialog.Accepted:
+            recap, total = dialog.get_recapitulatif()
+            QMessageBox.information(self, "Vente enregistrée",
+                f"{recap}\n\nTotal à payer : {total:.2f} ")
+            self.load_data()
 
 def main():
     app = QApplication(sys.argv)
